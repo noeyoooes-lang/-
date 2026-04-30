@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>보라보라 실시간 다이어리 💜</title>
+    <!-- Firebase SDK 로드 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // 🔥 보내주신 Firebase 설정값 적용 완료!
+        const firebaseConfig = {
+            apiKey: "AIzaSyB9NdgSPBdtlPoa9CzEDbSbcTTiRbArdyc",
+            authDomain: "proqq-a4bc6.firebaseapp.com",
+            projectId: "proqq-a4bc6",
+            storageBucket: "proqq-a4bc6.firebasestorage.app",
+            messagingSenderId: "776993534638",
+            appId: "1:776993534638:web:f532177c69f4207f6af33f"
+        };
+
+        // Firebase 초기화
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // 전역 변수 설정
+        let currentViewDate = new Date();
+        let selectedDate = formatDate(new Date());
+        let currentEmotion = 0;
+
+        function formatDate(date) {
+            let d = new Date(date), month = '' + (d.getMonth() + 1), day = '' + d.getDate(), year = d.getFullYear();
+            if (month.length < 2) month = '0' + month;
+            if (day.length < 2) day = '0' + day;
+            return [year, month, day].join('-');
+        }
+
+        // 실시간 저장 함수
+        async function saveAll(isAuto = false) {
+            const todayStr = formatDate(new Date());
+            if (selectedDate !== todayStr && !isAuto) {
+                alert("과거의 기록은 수정할 수 없슈! 💜");
+                return;
+            }
+
+            const habits = [];
+            document.querySelectorAll('.habit-item').forEach(item => {
+                habits.push({ 
+                    text: item.querySelector('span').innerText.replace('x', '').trim(), 
+                    checked: item.querySelector('input').checked 
+                });
+            });
+            
+            const data = { 
+                habits: habits, 
+                diary: document.getElementById('diary-input').value, 
+                emotion: currentEmotion,
+                updatedAt: new Date()
+            };
+
+            try {
+                await setDoc(doc(db, "diary", selectedDate), data);
+                if(!isAuto) {
+                    document.getElementById('status-msg').innerText = "실시간 저장 완료! 💜";
+                    updateStats();
+                    setTimeout(() => { document.getElementById('status-msg').innerText = ""; }, 1500);
+                }
+            } catch (e) { console.error("Error: ", e); }
+        }
+
+        // 데이터 불러오기
+        async function loadData() {
+            const list = document.getElementById('habit-list');
+            const diaryInput = document.getElementById('diary-input');
+            const saveBtn = document.getElementById('save-btn');
+            const habitInputArea = document.getElementById('habit-input-container');
+            const emotionBtns = document.querySelectorAll('.emotion-btn');
+            const isToday = (selectedDate === formatDate(new Date()));
+
+            list.innerHTML = ""; diaryInput.value = ""; currentEmotion = 0;
+            emotionBtns.forEach(btn => btn.classList.remove('active'));
+
+            if (isToday) {
+                diaryInput.readOnly = false; diaryInput.placeholder = "모쓸고야";
+                saveBtn.style.display = "block"; habitInputArea.style.display = "flex";
+                emotionBtns.forEach(btn => btn.disabled = false);
+            } else {
+                diaryInput.readOnly = true; diaryInput.placeholder = "🔒 과거 기록은 보기만 가능해요";
+                saveBtn.style.display = "none"; habitInputArea.style.display = "none";
+                emotionBtns.forEach(btn => btn.disabled = true);
+            }
+
+            const docRef = doc(db, "diary", selectedDate);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                if(data.habits) data.habits.forEach(h => createHabitElement(h.text, h.checked));
+                diaryInput.value = data.diary || "";
+                if(data.emotion) {
+                    currentEmotion = data.emotion;
+                    emotionBtns.forEach((btn, idx) => btn.classList.toggle('active', idx + 1 === data.emotion));
+                }
+            }
+        }
+
+        // 통계 업데이트
+        async function updateStats() {
+            const y = currentViewDate.getFullYear(), m = currentViewDate.getMonth();
+            let total = 0, checked = 0, diaryCount = 0;
+            const q = collection(db, "diary");
+            const querySnapshot = await getDocs(q);
+            querySnapshot.forEach((doc) => {
+                if(doc.id.startsWith(`${y}-${String(m+1).padStart(2, '0')}`)) {
+                    const data = doc.data();
+                    if (data.diary && data.diary.trim() !== "") diaryCount++;
+                    if (data.habits) data.habits.forEach(h => { total++; if (h.checked) checked++; });
+                }
+            });
+            const percent = total > 0 ? Math.round((checked / total) * 100) : 0;
+            document.getElementById('habit-percent').innerText = percent + "%";
+            document.getElementById('habit-fill').style.width = percent + "%";
+            document.getElementById('circle-chart').style.background = `conic-gradient(#9370db ${percent}%, #eee 0%)`;
+            document.getElementById('diary-count').innerText = diaryCount + "일";
+        }
+
+        function createHabitElement(text, checked) {
+            const div = document.createElement('div');
+            div.className = 'habit-item';
+            const isToday = (selectedDate === formatDate(new Date()));
+            div.innerHTML = `
+                <span><input type="checkbox" ${checked ? 'checked' : ''} ${isToday ? `onchange="window.saveAll(true); window.updateStats();"` : `disabled`}> ${text}</span>
+                ${isToday ? `<button class="del-x" onclick="this.parentElement.remove(); window.saveAll(true); window.updateStats();">x</button>` : ''}
+            `;
+            document.getElementById('habit-list').appendChild(div);
+        }
+
+        // 전역 노출 함수
+        window.setEmotion = (level) => { currentEmotion = level; document.querySelectorAll('.emotion-btn').forEach((btn, idx) => btn.classList.toggle('active', idx + 1 === level)); };
+        window.saveAll = saveAll;
+        window.addHabit = () => {
+            const input = document.getElementById('habit-input');
+            if (input.value.trim() === "") return;
+            createHabitElement(input.value, false);
+            input.value = ""; saveAll(true);
+        };
+        window.selectDate = (date) => { selectedDate = date; window.renderCalendar(); loadData(); };
+        window.changeMonth = (diff) => { currentViewDate.setMonth(currentViewDate.getMonth() + diff); window.renderCalendar(); updateStats(); };
+        window.renderCalendar = () => {
+            const grid = document.getElementById('calendar-grid');
+            const monthYear = document.getElementById('month-year');
+            grid.innerHTML = "";
+            const y = currentViewDate.getFullYear(), m = currentViewDate.getMonth();
+            monthYear.innerText = `${y}년 ${m + 1}월`;
+            const firstDay = new Date(y, m, 1).getDay();
+            const lastDate = new Date(y, m + 1, 0).getDate();
+            for (let i = 0; i < firstDay; i++) grid.innerHTML += `<div></div>`;
+            for (let i = 1; i <= lastDate; i++) {
+                const dateStr = formatDate(new Date(y, m, i));
+                const isSelected = dateStr === selectedDate ? 'selected' : '';
+                grid.innerHTML += `<div class="day ${isSelected}" onclick="window.selectDate('${dateStr}')">${i}</div>`;
+            }
+        };
+        window.updateStats = updateStats;
+        window.onload = () => { window.renderCalendar(); loadData(); updateStats(); };
+    </script>
+    <style>
+        @font-face { font-family: 'ParkDaHyun'; src: url('./온글잎 박다현체.ttf') format('truetype'); }
+        * { font-family: 'ParkDaHyun', sans-serif !important; box-sizing: border-box; }
+        body { background-color: #f8f9fa; background-image: radial-gradient(#d8bfd8 1px, transparent 1px); background-size: 20px 20px; display: flex; justify-content: center; padding: 40px 20px; margin: 0; color: #444; }
+        .diary-container { display: flex; gap: 20px; width: 100%; max-width: 850px; }
+        .left-column { flex: 0.8; display: flex; flex-direction: column; gap: 15px; }
+        .right-column { flex: 1; display: flex; flex-direction: column; gap: 15px; }
+        .section { background: white; border-radius: 15px; padding: 18px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        .section-title { font-weight: bold; margin-bottom: 15px; color: #9370db; border-bottom: 2px dashed #f0e6ff; padding-bottom: 5px; font-size: 20px; }
+        .emotion-selector { display: flex; justify-content: space-between; margin-bottom: 15px; padding: 5px; background: #fdfbff; border-radius: 10px; }
+        .emotion-btn { font-size: 24px; cursor: pointer; opacity: 0.2; transition: 0.2s; background: none; border: none; padding: 5px; }
+        .emotion-btn.active { opacity: 1; transform: scale(1.2); }
+        .habit-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed #eee; }
+        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 10px; font-size: 18px !important; }
+        .save-btn { background: #9370db; color: white; border: none; padding: 10px; border-radius: 10px; cursor: pointer; width: 100%; margin-top: 10px; font-size: 18px; }
+        .calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; color: #9370db; font-weight: bold; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+        .day { padding: 8px 0; cursor: pointer; border-radius: 8px; font-size: 16px; }
+        .day.selected { background: #9370db !important; color: white !important; }
+        .stats-container { display: flex; align-items: center; gap: 15px; margin-top: 10px; }
+        .circle-chart { width: 70px; height: 70px; border-radius: 50%; background: conic-gradient(#9370db 0%, #eee 0%); display: flex; align-items: center; justify-content: center; position: relative; }
+        .circle-chart::after { content: ""; width: 50px; height: 50px; background: white; border-radius: 50%; position: absolute; }
+        .chart-text { position: relative; z-index: 10; font-weight: bold; color: #9370db; font-size: 16px; }
+        .stat-details { flex: 1; }
+        .progress-bar { width: 100%; height: 8px; background: #eee; border-radius: 4px; margin-top: 5px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #9370db; width: 0%; transition: width 0.5s; }
+        .del-x { color: #ff6b6b; cursor: pointer; border: none; background: none; }
+        #status-msg { text-align: center; font-size: 14px; color: #9370db; height: 15px; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <div class="diary-container">
+        <div class="left-column">
+            <div class="section">
+                <div class="section-title">✔️ 할 일</div>
+                <div id="habit-input-container" style="display:flex; gap:5px; margin-bottom:10px;">
+                    <input type="text" id="habit-input" placeholder="모할고야">
+                    <button onclick="addHabit()" style="background:#9370db; color:white; border:none; border-radius:50%; width:35px; height:35px; cursor:pointer;">+</button>
+                </div>
+                <div id="habit-list"></div>
+            </div>
+            <div class="section">
+                <div class="section-title">💬 오늘의 한마디</div>
+                <div class="emotion-selector">
+                    <button class="emotion-btn" onclick="setEmotion(1)">😭</button>
+                    <button class="emotion-btn" onclick="setEmotion(2)">😕</button>
+                    <button class="emotion-btn" onclick="setEmotion(3)">😐</button>
+                    <button class="emotion-btn" onclick="setEmotion(4)">🙂</button>
+                    <button class="emotion-btn" onclick="setEmotion(5)">🥰</button>
+                </div>
+                <input type="text" id="diary-input" placeholder="모쓸고야">
+                <button class="save-btn" id="save-btn" onclick="saveAll()">누르슈</button>
+                <div id="status-msg"></div>
+            </div>
+        </div>
+        <div class="right-column">
+            <div class="section">
+                <div class="calendar-header">
+                    <button onclick="changeMonth(-1)" style="border:none; background:none; color:#9370db; cursor:pointer;">◀</button>
+                    <span id="month-year"></span>
+                    <button onclick="changeMonth(1)" style="border:none; background:none; color:#9370db; cursor:pointer;">▶</button>
+                </div>
+                <div class="calendar-grid" id="calendar-grid"></div>
+            </div>
+            <div class="section">
+                <div class="section-title">📊 이달의 리포트</div>
+                <div class="stats-container">
+                    <div class="circle-chart" id="circle-chart"><div class="chart-text" id="habit-percent">0%</div></div>
+                    <div class="stat-details">
+                        <div style="font-size:15px;">습관 달성도</div>
+                        <div class="progress-bar"><div id="habit-fill" class="progress-fill"></div></div>
+                        <div style="font-size:15px; margin-top:10px;">기록한 날: <b id="diary-count">0일</b></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
